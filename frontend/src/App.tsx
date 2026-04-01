@@ -4,6 +4,7 @@ import { useMidi } from "./hooks/useMidi";
 import { useImagePool } from "./hooks/useImagePool";
 import { Stage, type StageHandle } from "./components/Stage";
 import { ThemePicker } from "./components/ThemePicker";
+import { PianoKeyboard } from "./components/PianoKeyboard";
 import "./animations/entrance.css";
 
 export default function App() {
@@ -21,20 +22,39 @@ export default function App() {
     []
   );
 
-  const { isConnected, deviceName, error: midiError } = useMidi(handleNoteOn);
+  const { isConnected, deviceName, error: midiError, pressedNotes } = useMidi(handleNoteOn);
 
   // Keyboard fallback for testing without a MIDI device
+  // Also lights up the piano display
+  const [keyboardPressedNotes, setKeyboardPressedNotes] = useState<Set<number>>(new Set());
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.repeat) return;
-      // Map keyboard to fake MIDI note + velocity
       const note = 60 + (e.key.charCodeAt(0) % 24);
       const velocity = 64 + Math.floor(Math.random() * 63);
       stageRef.current?.spawnCharacter(note, velocity);
+      setKeyboardPressedNotes((prev) => new Set(prev).add(note));
+    };
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      const note = 60 + (e.key.charCodeAt(0) % 24);
+      setKeyboardPressedNotes((prev) => {
+        const next = new Set(prev);
+        next.delete(note);
+        return next;
+      });
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
   }, []);
+
+  // Merge MIDI pressed notes + keyboard fallback notes for the display
+  const allPressedNotes = new Set([...pressedNotes, ...keyboardPressedNotes]);
 
   // File upload handling
   const uploadFiles = useCallback(
@@ -87,6 +107,7 @@ export default function App() {
     >
       <Stage ref={stageRef} theme={theme} pickRandomImage={pickRandom} />
       <ThemePicker current={theme} onChange={setTheme} />
+      <PianoKeyboard pressedNotes={allPressedNotes} />
 
       {/* MIDI Status */}
       <div style={{

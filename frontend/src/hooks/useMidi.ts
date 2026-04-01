@@ -4,6 +4,7 @@ interface UseMidiResult {
   isConnected: boolean;
   deviceName: string | null;
   error: string | null;
+  pressedNotes: Set<number>;
 }
 
 export function useMidi(
@@ -12,22 +13,33 @@ export function useMidi(
   const [isConnected, setIsConnected] = useState(false);
   const [deviceName, setDeviceName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pressedNotes, setPressedNotes] = useState<Set<number>>(new Set());
   const onNoteOnRef = useRef(onNoteOn);
   onNoteOnRef.current = onNoteOn;
 
   const handleMidiMessage = useCallback((event: WebMidi.MIDIMessageEvent) => {
     const [status, note, velocity] = event.data!;
-    // Note-on: status 0x90-0x9F with velocity > 0
-    if ((status! & 0xf0) === 0x90 && velocity! > 0) {
+    const statusType = status! & 0xf0;
+
+    // Note-on: 0x90 with velocity > 0
+    if (statusType === 0x90 && velocity! > 0) {
+      setPressedNotes((prev) => new Set(prev).add(note!));
       onNoteOnRef.current(note!, velocity!);
+    }
+
+    // Note-off: 0x80 OR 0x90 with velocity 0
+    if (statusType === 0x80 || (statusType === 0x90 && velocity === 0)) {
+      setPressedNotes((prev) => {
+        const next = new Set(prev);
+        next.delete(note!);
+        return next;
+      });
     }
   }, []);
 
   useEffect(() => {
     if (!navigator.requestMIDIAccess) {
-      setError(
-        "Web MIDI API not supported. Please use Chrome or Edge."
-      );
+      setError("Web MIDI API not supported. Please use Chrome or Edge.");
       return;
     }
 
@@ -46,6 +58,7 @@ export function useMidi(
       if (!found) {
         setIsConnected(false);
         setDeviceName(null);
+        setPressedNotes(new Set());
       }
     };
 
@@ -53,10 +66,7 @@ export function useMidi(
       (access) => {
         midiAccess = access;
         attachInputs(access);
-
-        access.onstatechange = () => {
-          attachInputs(access);
-        };
+        access.onstatechange = () => attachInputs(access);
       },
       (err) => {
         setError(`MIDI access denied: ${err.message}`);
@@ -72,5 +82,5 @@ export function useMidi(
     };
   }, [handleMidiMessage]);
 
-  return { isConnected, deviceName, error };
+  return { isConnected, deviceName, error, pressedNotes };
 }
